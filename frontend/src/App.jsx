@@ -3,6 +3,7 @@ import Header from './components/Header.jsx';
 import ForceWipeBanner from './components/ForceWipeBanner.jsx';
 import JustWiped from './pages/JustWiped.jsx';
 import UpcomingWipes from './pages/UpcomingWipes.jsx';
+import Alerts from './pages/Alerts.jsx';
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
           <Routes>
             <Route path="/"         element={<JustWiped />} />
             <Route path="/upcoming" element={<UpcomingWipes />} />
+            <Route path="/alerts"   element={<Alerts />} />
             <Route path="*"         element={<Navigate to="/" replace />} />
           </Routes>
         </main>

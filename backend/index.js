@@ -1,13 +1,16 @@
 'use strict';
 
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-const cron    = require('node-cron');
+const express  = require('express');
+const cors     = require('cors');
+const path     = require('path');
+const cron     = require('node-cron');
+const crypto   = require('crypto');
 const Database = require('better-sqlite3');
 
-const { fetchAndCacheServers } = require('./services/battlemetrics');
+const { fetchAndCacheServers }   = require('./services/battlemetrics');
 const { predictNextWipe, getNextForceWipe } = require('./services/wipePredictor');
+const { processSubscriptions, matchesFilters, sendToWebhook, buildEmbed, DISCORD_WEBHOOK_REGEX }
+  = require('./services/discordNotifier');
 
 const PORT = process.env.PORT || 3001;
 const app  = express();
@@ -42,28 +45,47 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS wipe_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    server_id   TEXT    NOT NULL,
-    wipe_time   TEXT    NOT NULL,
-    detected_at TEXT    NOT NULL,
+    server_id   TEXT NOT NULL,
+    wipe_time   TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
     UNIQUE(server_id, wipe_time)
+  );
+
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    webhook_url TEXT NOT NULL,
+    filters     TEXT NOT NULL DEFAULT '{}',
+    active      INTEGER DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    last_fired  TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS notified_wipes (
+    subscription_id TEXT NOT NULL,
+    server_id       TEXT NOT NULL,
+    wipe_time       TEXT NOT NULL,
+    notified_at     TEXT NOT NULL,
+    PRIMARY KEY (subscription_id, server_id, wipe_time)
   );
 
   CREATE INDEX IF NOT EXISTS idx_last_wipe ON servers(rust_last_wipe DESC);
   CREATE INDEX IF NOT EXISTS idx_rank      ON servers(rank);
   CREATE INDEX IF NOT EXISTS idx_country   ON servers(country);
   CREATE INDEX IF NOT EXISTS idx_wh_server ON wipe_history(server_id);
+  CREATE INDEX IF NOT EXISTS idx_nw_sub    ON notified_wipes(subscription_id);
 `);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 
+// ── Shared helpers ─────────────────────────────────────────────────────────────
 function parseTags(servers) {
   return servers.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') }));
 }
 
-// Inline schedule detection (mirrors wipePredictor logic) for post-query filtering
-function matchesSchedule(name, tags, schedule) {
+function scheduleMatches(name, tags, schedule) {
   const combined = (name + ' ' + (Array.isArray(tags) ? tags.join(' ') : '')).toLowerCase();
   switch (schedule) {
     case 'daily':    return /\bdaily\b|\b24[\s-]?hr/.test(combined);
@@ -75,7 +97,7 @@ function matchesSchedule(name, tags, schedule) {
   }
 }
 
-// ── GET /api/stats ─────────────────────────────────────────────────────────
+// ── GET /api/stats ─────────────────────────────────────────────────────────────
 app.get('/api/stats', (_req, res) => {
   const total     = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE status='online'`).get();
   const today     = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE rust_last_wipe >= datetime('now','-24 hours')`).get();
@@ -91,7 +113,7 @@ app.get('/api/stats', (_req, res) => {
   });
 });
 
-// ── GET /api/servers/wiped ────────────────────────────────────────────────
+// ── GET /api/servers/wiped ─────────────────────────────────────────────────────
 app.get('/api/servers/wiped', (req, res) => {
   const hours      = Math.min(parseInt(req.query.hours)      || 24,  168);
   const minPlayers = Math.max(parseInt(req.query.minPlayers) || 0,     0);
@@ -103,49 +125,30 @@ app.get('/api/servers/wiped', (req, res) => {
   const schedule   = req.query.schedule   || null;
   const sort       = req.query.sort       || 'recent';
 
-  const sortMap = {
-    recent:  'rust_last_wipe DESC',
-    players: 'players DESC',
-    rank:    'rank ASC',
-  };
+  const sortMap = { recent: 'rust_last_wipe DESC', players: 'players DESC', rank: 'rank ASC' };
   const orderBy = sortMap[sort] || sortMap.recent;
+  const cutoff  = new Date(Date.now() - hours * 3600000).toISOString();
 
-  const cutoff = new Date(Date.now() - hours * 3600000).toISOString();
+  let where  = `rust_last_wipe >= @cutoff AND status = 'online' AND players >= @minPlayers`;
+  const p    = { cutoff, minPlayers };
 
-  let where = `rust_last_wipe >= @cutoff AND status = 'online' AND players >= @minPlayers`;
-  const params = { cutoff, minPlayers };
-
-  if (country && country !== 'all') {
-    where += ` AND country = @country`;
-    params.country = country.toUpperCase();
-  }
-  if (serverType && serverType !== 'all') {
-    where += ` AND server_type = @serverType`;
-    params.serverType = serverType;
-  }
+  if (country && country !== 'all') { where += ` AND country = @country`; p.country = country.toUpperCase(); }
+  if (serverType && serverType !== 'all') { where += ` AND server_type = @serverType`; p.serverType = serverType; }
   if (mapSize && mapSize !== 'all') {
-    const ranges = { small: [0, 2000], medium: [2001, 3500], large: [3501, 4500], xl: [4501, 99999] };
-    if (ranges[mapSize]) {
-      where += ` AND world_size BETWEEN @wsMin AND @wsMax`;
-      [params.wsMin, params.wsMax] = ranges[mapSize];
-    }
+    const ranges = { small:[0,2000], medium:[2001,3500], large:[3501,4500], xl:[4501,99999] };
+    if (ranges[mapSize]) { where += ` AND world_size BETWEEN @wsMin AND @wsMax`; [p.wsMin,p.wsMax] = ranges[mapSize]; }
   }
 
-  // Fetch all matching rows (for in-memory schedule filter), then paginate
-  const rows = db.prepare(`SELECT * FROM servers WHERE ${where} ORDER BY ${orderBy}`).all(params);
-  let results = parseTags(rows);
+  let results = parseTags(db.prepare(`SELECT * FROM servers WHERE ${where} ORDER BY ${orderBy}`).all(p));
 
   if (schedule && schedule !== 'all') {
-    results = results.filter(s => matchesSchedule(s.name, s.tags, schedule));
+    results = results.filter(s => scheduleMatches(s.name, s.tags, schedule));
   }
 
-  const total     = results.length;
-  const paginated = results.slice(offset, offset + limit);
-
-  res.json({ servers: paginated, total, lastUpdated: new Date().toISOString() });
+  res.json({ servers: results.slice(offset, offset + limit), total: results.length, lastUpdated: new Date().toISOString() });
 });
 
-// ── GET /api/servers/upcoming ────────────────────────────────────────────
+// ── GET /api/servers/upcoming ──────────────────────────────────────────────────
 app.get('/api/servers/upcoming', (req, res) => {
   const hours      = Math.min(parseInt(req.query.hours)      || 48,  240);
   const minPlayers = Math.max(parseInt(req.query.minPlayers) || 0,     0);
@@ -157,85 +160,153 @@ app.get('/api/servers/upcoming', (req, res) => {
   const sort       = req.query.sort       || 'soon';
 
   let where = `s.status = 'online' AND s.rust_last_wipe IS NOT NULL AND s.players >= @minPlayers`;
-  const params = { minPlayers };
+  const p   = { minPlayers };
 
-  if (country && country !== 'all') {
-    where += ` AND s.country = @country`;
-    params.country = country.toUpperCase();
-  }
-  if (serverType && serverType !== 'all') {
-    where += ` AND s.server_type = @serverType`;
-    params.serverType = serverType;
-  }
+  if (country && country !== 'all') { where += ` AND s.country = @country`; p.country = country.toUpperCase(); }
+  if (serverType && serverType !== 'all') { where += ` AND s.server_type = @serverType`; p.serverType = serverType; }
 
   const rows = db.prepare(`
     SELECT s.*,
-      (SELECT COUNT(*)   FROM wipe_history wh  WHERE wh.server_id = s.id) AS wipe_count,
-      (SELECT MAX(wipe_time) FROM wipe_history wh2
-        WHERE wh2.server_id = s.id AND wh2.wipe_time < s.rust_last_wipe)  AS prev_wipe
-    FROM servers s WHERE ${where}
-    ORDER BY s.players DESC
-  `).all(params);
+      (SELECT COUNT(*) FROM wipe_history wh WHERE wh.server_id = s.id) AS wipe_count,
+      (SELECT MAX(wipe_time) FROM wipe_history wh2 WHERE wh2.server_id = s.id AND wh2.wipe_time < s.rust_last_wipe) AS prev_wipe
+    FROM servers s WHERE ${where} ORDER BY s.players DESC
+  `).all(p);
 
-  const servers   = parseTags(rows);
   const forceWipe = getNextForceWipe();
   const now       = new Date();
   const cutoff    = new Date(now.getTime() + hours * 3600000);
 
   let upcoming = [];
-  for (const s of servers) {
+  for (const s of parseTags(rows)) {
     const pred = predictNextWipe(s, forceWipe);
     if (!pred) continue;
     const next = new Date(pred.nextWipe);
     if (next > now && next <= cutoff) {
-      upcoming.push({
-        ...s,
-        nextWipe:      pred.nextWipe,
-        wipeSchedule:  pred.schedule,
-        intervalDays:  pred.intervalDays,
-        confidence:    pred.confidence,
-      });
+      upcoming.push({ ...s, nextWipe: pred.nextWipe, wipeSchedule: pred.schedule, intervalDays: pred.intervalDays, confidence: pred.confidence });
     }
   }
 
-  // Schedule filter on predicted type
-  if (schedule && schedule !== 'all') {
-    upcoming = upcoming.filter(s => s.wipeSchedule === schedule);
-  }
+  if (schedule && schedule !== 'all') upcoming = upcoming.filter(s => s.wipeSchedule === schedule);
 
-  // Sort
-  const confOrder = { high: 0, medium: 1, low: 2 };
+  const confOrder = { high:0, medium:1, low:2 };
   switch (sort) {
-    case 'players':    upcoming.sort((a, b) => b.players - a.players); break;
-    case 'confidence': upcoming.sort((a, b) =>
-      (confOrder[a.confidence] ?? 2) - (confOrder[b.confidence] ?? 2)); break;
-    default:           upcoming.sort((a, b) => new Date(a.nextWipe) - new Date(b.nextWipe));
+    case 'players':    upcoming.sort((a,b) => b.players - a.players); break;
+    case 'confidence': upcoming.sort((a,b) => (confOrder[a.confidence]??2) - (confOrder[b.confidence]??2)); break;
+    default:           upcoming.sort((a,b) => new Date(a.nextWipe) - new Date(b.nextWipe));
   }
 
-  res.json({
-    servers:      upcoming.slice(offset, offset + limit),
-    total:        upcoming.length,
-    nextForceWipe: forceWipe.toISOString(),
-    lastUpdated:  new Date().toISOString(),
-  });
+  res.json({ servers: upcoming.slice(offset, offset+limit), total: upcoming.length, nextForceWipe: forceWipe.toISOString(), lastUpdated: new Date().toISOString() });
 });
 
-// ── GET /api/servers/search ───────────────────────────────────────────────
+// ── GET /api/servers/search ────────────────────────────────────────────────────
 app.get('/api/servers/search', (req, res) => {
   const q     = (req.query.q || '').trim();
   const limit = Math.min(parseInt(req.query.limit) || 20, 50);
   if (!q) return res.json({ servers: [] });
 
-  const rows = db.prepare(`
-    SELECT * FROM servers
-    WHERE name LIKE @q AND status = 'online'
-    ORDER BY players DESC LIMIT @limit
-  `).all({ q: `%${q}%`, limit });
-
+  const rows = db.prepare(`SELECT * FROM servers WHERE name LIKE @q AND status='online' ORDER BY players DESC LIMIT @limit`)
+    .all({ q: `%${q}%`, limit });
   res.json({ servers: parseTags(rows) });
 });
 
-// ── Production static frontend ─────────────────────────────────────────────
+// ── Subscription CRUD ──────────────────────────────────────────────────────────
+
+// GET /api/subscriptions
+app.get('/api/subscriptions', (_req, res) => {
+  const subs = db.prepare(`SELECT * FROM subscriptions ORDER BY created_at DESC`).all();
+  res.json({ subscriptions: subs.map(s => ({ ...s, filters: JSON.parse(s.filters || '{}') })) });
+});
+
+// POST /api/subscriptions
+app.post('/api/subscriptions', (req, res) => {
+  const { name, webhook_url, filters = {} } = req.body;
+
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  if (!webhook_url)          return res.status(400).json({ error: 'Webhook URL is required' });
+  if (!DISCORD_WEBHOOK_REGEX.test(webhook_url)) {
+    return res.status(400).json({ error: 'Invalid Discord webhook URL' });
+  }
+
+  const id = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO subscriptions (id, name, webhook_url, filters, active, created_at)
+    VALUES (?, ?, ?, ?, 1, ?)
+  `).run(id, name.trim(), webhook_url.trim(), JSON.stringify(filters), new Date().toISOString());
+
+  res.status(201).json({ id, message: 'Subscription created' });
+});
+
+// PATCH /api/subscriptions/:id
+app.patch('/api/subscriptions/:id', (req, res) => {
+  const sub = db.prepare(`SELECT * FROM subscriptions WHERE id = ?`).get(req.params.id);
+  if (!sub) return res.status(404).json({ error: 'Not found' });
+
+  const { name, webhook_url, filters, active } = req.body;
+
+  if (webhook_url && !DISCORD_WEBHOOK_REGEX.test(webhook_url)) {
+    return res.status(400).json({ error: 'Invalid Discord webhook URL' });
+  }
+
+  db.prepare(`
+    UPDATE subscriptions SET
+      name        = COALESCE(?, name),
+      webhook_url = COALESCE(?, webhook_url),
+      filters     = COALESCE(?, filters),
+      active      = COALESCE(?, active)
+    WHERE id = ?
+  `).run(
+    name?.trim()        || null,
+    webhook_url?.trim() || null,
+    filters ? JSON.stringify(filters) : null,
+    active != null ? (active ? 1 : 0) : null,
+    req.params.id,
+  );
+
+  res.json({ message: 'Updated' });
+});
+
+// DELETE /api/subscriptions/:id
+app.delete('/api/subscriptions/:id', (req, res) => {
+  const sub = db.prepare(`SELECT id FROM subscriptions WHERE id=?`).get(req.params.id);
+  if (!sub) return res.status(404).json({ error: 'Not found' });
+
+  db.prepare(`DELETE FROM subscriptions WHERE id=?`).run(req.params.id);
+  db.prepare(`DELETE FROM notified_wipes WHERE subscription_id=?`).run(req.params.id);
+  res.json({ message: 'Deleted' });
+});
+
+// POST /api/subscriptions/:id/test  — sends a test notification
+app.post('/api/subscriptions/:id/test', async (req, res) => {
+  const sub = db.prepare(`SELECT * FROM subscriptions WHERE id=?`).get(req.params.id);
+  if (!sub) return res.status(404).json({ error: 'Not found' });
+
+  const filters = JSON.parse(sub.filters || '{}');
+
+  // Find a matching server to use as the example
+  const candidates = parseTags(db.prepare(`
+    SELECT * FROM servers WHERE status='online' AND ip IS NOT NULL ORDER BY players DESC LIMIT 200
+  `).all());
+
+  const example = candidates.find(s => matchesFilters(s, filters)) || candidates[0];
+
+  if (!example) {
+    return res.status(404).json({ error: 'No servers found to preview with' });
+  }
+
+  try {
+    await sendToWebhook(sub.webhook_url, [{
+      ...buildEmbed(example),
+      title: `[TEST] ${example.name}`,
+      description: '_This is a test notification from RustWipe. Real alerts will fire automatically._',
+      color: 0x5865F2,
+    }]);
+    res.json({ message: 'Test notification sent!' });
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// ── Production static frontend ─────────────────────────────────────────────────
 const frontendBuild = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendBuild));
 app.get('*', (_req, res) => {
@@ -244,15 +315,20 @@ app.get('*', (_req, res) => {
   });
 });
 
-// ── Startup ────────────────────────────────────────────────────────────────
+// ── Startup ────────────────────────────────────────────────────────────────────
+async function refresh() {
+  await fetchAndCacheServers(db);
+  await processSubscriptions(db);
+}
+
 (async () => {
   console.log('[RustWipe] Starting…');
-  try { await fetchAndCacheServers(db); }
+  try { await refresh(); }
   catch (err) { console.error('[RustWipe] Initial fetch failed:', err.message); }
 
   cron.schedule('*/5 * * * *', async () => {
-    try { await fetchAndCacheServers(db); }
-    catch (err) { console.error('[RustWipe] Cron refresh failed:', err.message); }
+    try { await refresh(); }
+    catch (err) { console.error('[RustWipe] Cron failed:', err.message); }
   });
 
   app.listen(PORT, () => console.log(`[RustWipe] API http://localhost:${PORT}`));

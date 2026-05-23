@@ -22,9 +22,7 @@ export default function Header() {
     const q = e.target.value;
     setQuery(q);
     clearTimeout(debounceRef.current);
-
     if (q.length < 2) { setResults([]); setOpen(false); return; }
-
     debounceRef.current = setTimeout(async () => {
       try {
         const { data } = await axios.get('/api/servers/search', { params: { q, limit: 8 } });
@@ -32,11 +30,6 @@ export default function Header() {
         setOpen(true);
       } catch { setResults([]); }
     }, 200);
-  }
-
-  function handleBlur() {
-    // Delay so mousedown on a result fires first
-    setTimeout(() => setOpen(false), 200);
   }
 
   return (
@@ -58,6 +51,7 @@ export default function Header() {
         <nav className="flex items-center gap-1 flex-shrink-0">
           <NavLink to="/"         className={NAV}>Just Wiped</NavLink>
           <NavLink to="/upcoming" className={NAV}>Upcoming</NavLink>
+          <NavLink to="/alerts"   className={NAV}>🔔 Alerts</NavLink>
         </nav>
 
         {/* Search */}
@@ -69,7 +63,7 @@ export default function Header() {
             value={query}
             onChange={handleSearch}
             onFocus={() => results.length > 0 && setOpen(true)}
-            onBlur={handleBlur}
+            onBlur={() => setTimeout(() => setOpen(false), 200)}
           />
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-300 pointer-events-none"
             fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -83,15 +77,13 @@ export default function Header() {
                 <a
                   key={s.id}
                   href={`steam://connect/${s.ip}:${s.port || 28015}`}
-                  onMouseDown={e => e.preventDefault()} // prevent blur closing before click
+                  onMouseDown={e => e.preventDefault()}
                   className="flex items-center gap-3 px-4 py-2.5 hover:bg-dark-500 transition-colors"
                 >
                   <span className="text-lg leading-none">{countryFlag(s.country)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-white truncate">{s.name}</div>
-                    <div className="text-xs text-dark-300">
-                      {s.players}/{s.max_players} players · {s.country}
-                    </div>
+                    <div className="text-xs text-dark-300">{s.players}/{s.max_players} players · {s.country}</div>
                   </div>
                   <span className="text-xs text-dark-400 flex-shrink-0">Connect</span>
                 </a>
