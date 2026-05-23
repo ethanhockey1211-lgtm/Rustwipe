@@ -12,16 +12,16 @@ export default function App() {
         <ForceWipeBanner />
         <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
           <Routes>
-            <Route path="/"          element={<JustWiped />} />
-            <Route path="/upcoming"  element={<UpcomingWipes />} />
-            <Route path="*"          element={<Navigate to="/" replace />} />
+            <Route path="/"         element={<JustWiped />} />
+            <Route path="/upcoming" element={<UpcomingWipes />} />
+            <Route path="*"         element={<Navigate to="/" replace />} />
           </Routes>
         </main>
-        <footer className="border-t border-dark-600 py-4 text-center text-dark-300 text-xs">
-          RustWipe — Data sourced from{' '}
+        <footer className="border-t border-dark-600 py-4 text-center text-dark-400 text-xs">
+          RustWipe · Data from{' '}
           <a href="https://www.battlemetrics.com" target="_blank" rel="noopener noreferrer"
-             className="text-rust-400 hover:text-rust-300">BattleMetrics</a>
-          {' '}· Refreshes every 5 minutes
+            className="text-rust-500 hover:text-rust-400">BattleMetrics</a>
+          {' '}· Auto-refreshes every 5 min · Force wipe = first Thursday each month
         </footer>
       </div>
     </BrowserRouter>

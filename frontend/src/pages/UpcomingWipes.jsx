@@ -1,32 +1,40 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import FilterBar, { defaultFilters } from '../components/FilterBar.jsx';
 import { UpcomingServerCard } from '../components/ServerCard.jsx';
+import { SkeletonGrid } from '../components/SkeletonCard.jsx';
 import StatsBar from '../components/StatsBar.jsx';
-import LoadingSpinner from '../components/LoadingSpinner.jsx';
+import DashboardStats from '../components/DashboardStats.jsx';
 import { format } from 'date-fns';
 
 const PAGE_SIZE = 48;
 
 export default function UpcomingWipes() {
-  const [filters, setFilters]   = useState(defaultFilters('upcoming'));
-  const [servers, setServers]   = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [page, setPage]         = useState(0);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
+  const [filters, setFilters]     = useState(defaultFilters('upcoming'));
+  const [servers, setServers]     = useState([]);
+  const [total, setTotal]         = useState(0);
+  const [page, setPage]           = useState(0);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [nextForceWipe, setNextForceWipe] = useState(null);
+  const abortRef = useRef(null);
 
-  const fetch = useCallback(async (f, p) => {
+  const fetchServers = useCallback(async (f, p) => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+
     setLoading(true);
     setError(null);
     try {
       const { data } = await axios.get('/api/servers/upcoming', {
+        signal: abortRef.current.signal,
         params: {
           hours:      f.hours,
-          serverType: f.serverType === 'all' ? undefined : f.serverType,
-          country:    f.country    === 'all' ? undefined : f.country,
+          sort:       f.sort,
+          schedule:   f.schedule   !== 'all' ? f.schedule   : undefined,
+          serverType: f.serverType !== 'all' ? f.serverType : undefined,
+          country:    f.country    !== 'all' ? f.country    : undefined,
           minPlayers: f.minPlayers || 0,
           limit:      PAGE_SIZE,
           offset:     p * PAGE_SIZE,
@@ -37,7 +45,8 @@ export default function UpcomingWipes() {
       setLastUpdated(data.lastUpdated || null);
       if (data.nextForceWipe) setNextForceWipe(data.nextForceWipe);
     } catch (err) {
-      setError('Failed to load servers. Is the backend running?');
+      if (axios.isCancel(err) || err.name === 'CanceledError') return;
+      setError('Failed to load servers — is the backend running?');
     } finally {
       setLoading(false);
     }
@@ -45,83 +54,93 @@ export default function UpcomingWipes() {
 
   useEffect(() => {
     setPage(0);
-    fetch(filters, 0);
-  }, [filters]);
+    fetchServers(filters, 0);
+  }, [filters, fetchServers]);
+
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    fetchServers(filters, page);
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetch(filters, page);
-  }, [page]);
-
-  useEffect(() => {
-    const id = setInterval(() => fetch(filters, page), 120000);
+    const id = setInterval(() => {
+      if (!document.hidden) fetchServers(filters, page);
+    }, 120000);
     return () => clearInterval(id);
-  }, [filters, page]);
+  }, [filters, page, fetchServers]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">
-          ⏰ Upcoming Wipes
-        </h1>
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold text-white">⏰ Upcoming Wipes</h1>
         <p className="text-dark-300 text-sm mt-1">
           Servers predicted to wipe soon — plan your next Rust session
         </p>
       </div>
 
+      <DashboardStats />
+
       {/* Confidence legend */}
-      <div className="flex flex-wrap gap-4 mb-4 text-xs text-dark-300">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 mb-4 text-xs text-dark-300">
+        <span className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-          High confidence — based on 4+ recorded wipes
-        </div>
-        <div className="flex items-center gap-1.5">
+          High — 4+ recorded wipes (very reliable)
+        </span>
+        <span className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-          Medium — based on 2–3 wipes or name analysis
-        </div>
-        <div className="flex items-center gap-1.5">
+          Medium — 2–3 wipes or name/tag analysis
+        </span>
+        <span className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-dark-300 inline-block" />
-          Low — best guess from schedule patterns
-        </div>
+          Low — heuristic guess from schedule patterns
+        </span>
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} mode="upcoming" />
 
       {error ? (
-        <div className="text-center py-16">
-          <p className="text-red-400 mb-2">{error}</p>
-          <button className="btn-primary" onClick={() => fetch(filters, page)}>Retry</button>
-        </div>
+        <ErrorState message={error} onRetry={() => fetchServers(filters, page)} />
       ) : loading ? (
-        <LoadingSpinner message="Predicting upcoming wipes…" />
+        <SkeletonGrid count={PAGE_SIZE} />
       ) : servers.length === 0 ? (
-        <div className="text-center py-24">
-          <p className="text-dark-300 text-lg mb-2">No upcoming wipes found in this window</p>
-          <p className="text-dark-400 text-sm">Try extending the time window or checking back later</p>
-          {nextForceWipe && (
-            <p className="text-dark-400 text-sm mt-1">
-              Next force wipe: {format(new Date(nextForceWipe), 'MMM d, yyyy h:mm a')}
-            </p>
-          )}
-        </div>
+        <EmptyState nextForceWipe={nextForceWipe} />
       ) : (
         <>
-          <StatsBar
-            total={total}
-            showing={servers.length}
-            label="servers predicted to wipe"
-            lastUpdated={lastUpdated}
-          />
-
+          <StatsBar total={total} showing={servers.length} label="servers predicted to wipe" lastUpdated={lastUpdated} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {servers.map(s => <UpcomingServerCard key={s.id} server={s} />)}
           </div>
-
-          {totalPages > 1 && (
-            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-          )}
+          {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onChange={setPage} />}
         </>
+      )}
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div className="text-center py-20">
+      <p className="text-red-400 mb-4">{message}</p>
+      <button className="btn-primary" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
+
+function EmptyState({ nextForceWipe }) {
+  return (
+    <div className="text-center py-24">
+      <p className="text-4xl mb-3">📅</p>
+      <p className="text-dark-200 text-lg font-medium mb-1">No upcoming wipes in this window</p>
+      <p className="text-dark-400 text-sm mb-3">Try extending the time window or adjusting filters</p>
+      {nextForceWipe && (
+        <p className="text-dark-300 text-sm">
+          Next force wipe: <span className="text-white font-semibold">
+            {format(new Date(nextForceWipe), 'MMMM d, yyyy · h:mm a')}
+          </span>
+        </p>
       )}
     </div>
   );
@@ -130,23 +149,11 @@ export default function UpcomingWipes() {
 function Pagination({ page, totalPages, onChange }) {
   return (
     <div className="flex items-center justify-center gap-2 mt-8">
-      <button
-        className="btn-ghost border border-dark-500 disabled:opacity-30"
-        disabled={page === 0}
-        onClick={() => onChange(page - 1)}
-      >
-        ← Prev
-      </button>
-      <span className="text-sm text-dark-300 px-4">
-        Page {page + 1} of {totalPages}
-      </span>
-      <button
-        className="btn-ghost border border-dark-500 disabled:opacity-30"
-        disabled={page >= totalPages - 1}
-        onClick={() => onChange(page + 1)}
-      >
-        Next →
-      </button>
+      <button className="btn-ghost border border-dark-500 disabled:opacity-30" disabled={page === 0}
+        onClick={() => onChange(page - 1)}>← Prev</button>
+      <span className="text-sm text-dark-300 px-4">Page {page + 1} of {totalPages}</span>
+      <button className="btn-ghost border border-dark-500 disabled:opacity-30" disabled={page >= totalPages - 1}
+        onClick={() => onChange(page + 1)}>Next →</button>
     </div>
   );
 }
