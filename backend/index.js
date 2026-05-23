@@ -132,11 +132,45 @@ function withPrediction(server) {
 
 // ── GET /api/stats ─────────────────────────────────────────────────────────────
 app.get('/api/stats', (_req, res) => {
-  const total     = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE status='online'`).get();
-  const today     = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE rust_last_wipe >= datetime('now','-24 hours')`).get();
-  const thisWeek  = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE rust_last_wipe >= datetime('now','-7 days')`).get();
-  const dbUpdated = db.prepare(`SELECT MAX(updated_at) as t FROM servers`).get();
-  res.json({ totalServers: total.c, wipedToday: today.c, wipedThisWeek: thisWeek.c, nextForceWipe: getNextForceWipe().toISOString(), lastUpdated: dbUpdated.t || null });
+  const total         = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE status='online'`).get();
+  const today         = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE rust_last_wipe >= datetime('now','-24 hours')`).get();
+  const thisWeek      = db.prepare(`SELECT COUNT(*) as c FROM servers WHERE rust_last_wipe >= datetime('now','-7 days')`).get();
+  const totalWipes    = db.prepare(`SELECT COUNT(*) as c FROM wipe_history`).get();
+  const withHistory   = db.prepare(`SELECT COUNT(DISTINCT server_id) as c FROM wipe_history GROUP BY server_id HAVING COUNT(*)>=2`).all().length;
+  const dbUpdated     = db.prepare(`SELECT MAX(updated_at) as t FROM servers`).get();
+  res.json({
+    totalServers:     total.c,
+    wipedToday:       today.c,
+    wipedThisWeek:    thisWeek.c,
+    totalWipesTracked: totalWipes.c,
+    serversWithHistory: withHistory,
+    nextForceWipe:    getNextForceWipe().toISOString(),
+    lastUpdated:      dbUpdated.t || null,
+  });
+});
+
+// ── GET /api/servers/recent (live feed) ────────────────────────────────────────
+app.get('/api/servers/recent', (req, res) => {
+  const limit   = Math.min(parseInt(req.query.limit)  || 50, 200);
+  const hours   = Math.min(parseInt(req.query.hours)  || 12, 168);
+  const country = req.query.country || null;
+
+  const cutoff = new Date(Date.now() - hours * 3600000).toISOString();
+  let where = `rust_last_wipe >= @cutoff AND status='online' AND ip IS NOT NULL`;
+  const p   = { cutoff };
+
+  if (country && country !== 'all') { where += ` AND country=@country`; p.country = country.toUpperCase(); }
+
+  const rows = parseTags(db.prepare(
+    `SELECT * FROM servers WHERE ${where} ORDER BY rust_last_wipe DESC LIMIT @limit`
+  ).all({ ...p, limit }));
+
+  const freshCutoff = Date.now() - 20 * 60 * 1000; // last 20 min
+  rows.forEach(s => {
+    s.isFresh = !!s.rust_last_wipe && new Date(s.rust_last_wipe).getTime() >= freshCutoff;
+  });
+
+  res.json({ servers: rows, lastUpdated: new Date().toISOString() });
 });
 
 // ── GET /api/servers/wiped ─────────────────────────────────────────────────────

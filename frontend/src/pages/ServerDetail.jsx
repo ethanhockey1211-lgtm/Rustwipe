@@ -132,6 +132,24 @@ export default function ServerDetail() {
     ? formatDistance(new Date(server.rust_born), new Date(), { addSuffix: false }) + ' old'
     : null;
 
+  // Consistency score: how reliably does this server wipe on schedule?
+  const intervals = wipeHistory.map(w => w.intervalDays).filter(d => d != null && d > 0);
+  const consistency = (() => {
+    if (intervals.length < 2) return null;
+    const mean = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+    const variance = intervals.reduce((s,d)=>s+Math.pow(d-mean,2),0) / intervals.length;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
+    return Math.max(0, Math.round((1 - Math.min(cv, 1)) * 100));
+  })();
+
+  const consistencyColor = consistency == null ? '' :
+    consistency >= 85 ? 'text-green-400' :
+    consistency >= 60 ? 'text-amber-400' : 'text-red-400';
+
+  const hoursSinceWipe = server.rust_last_wipe
+    ? (Date.now() - new Date(server.rust_last_wipe).getTime()) / 3600000 : Infinity;
+  const hot = hoursSinceWipe < 4 && playerPct >= 25;
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
 
@@ -209,13 +227,24 @@ export default function ServerDetail() {
       {/* Stats grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <InfoCard label="Map Size"   value={server.world_size?.toLocaleString() || '—'} icon="🗺" />
-        <InfoCard label="Map"        value={server.map_name || 'Procedural'} icon="🌍" />
         <InfoCard label="Wipes Tracked" value={wipeHistory.length} icon="📊" />
         <InfoCard label="Avg Interval"
           value={avgInterval != null ? (avgInterval < 1 ? `${Math.round(avgInterval*24)}h` : `${avgInterval.toFixed(1)}d`) : '—'}
           icon="⏱"
         />
+        <InfoCard
+          label="Schedule Reliability"
+          value={consistency != null ? `${consistency}%` : '—'}
+          icon={consistency == null ? '📈' : consistency >= 85 ? '✅' : consistency >= 60 ? '⚠️' : '❌'}
+          valueClass={consistencyColor}
+          tooltip={consistency != null ? `Based on ${intervals.length} recorded intervals` : 'Need 3+ wipes to calculate'}
+        />
       </div>
+      {hot && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-orange-900/30 border border-orange-700/40 rounded-xl text-orange-300 text-sm">
+          🔥 <span className="font-semibold">Hot server</span> — wiped recently and filling up fast ({Math.round(playerPct)}% full)
+        </div>
+      )}
 
       {/* Wipe info row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -326,11 +355,11 @@ export default function ServerDetail() {
   );
 }
 
-function InfoCard({ icon, label, value }) {
+function InfoCard({ icon, label, value, valueClass = 'text-white', tooltip }) {
   return (
-    <div className="card p-4 text-center">
+    <div className="card p-4 text-center" title={tooltip}>
       <div className="text-2xl mb-1">{icon}</div>
-      <div className="text-lg font-bold text-white">{value}</div>
+      <div className={`text-lg font-bold ${valueClass}`}>{value}</div>
       <div className="text-xs text-dark-400">{label}</div>
     </div>
   );

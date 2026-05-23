@@ -127,11 +127,17 @@ export function WipedServerCard({ server, watchlist }) {
   const isNew    = rust_last_wipe && (Date.now()-new Date(rust_last_wipe).getTime()) < 3600000;
   const bmUrl    = `https://www.battlemetrics.com/servers/rust/${id}`;
   const schedule = guessSchedule(name, server.tags);
+  const hoursSince = rust_last_wipe ? (Date.now()-new Date(rust_last_wipe).getTime())/3600000 : Infinity;
+  const pct        = max_players > 0 ? players/max_players : 0;
+  const isHot    = !isNew && hoursSince < 4 && (pct >= 0.25 || players >= 30);
 
   return (
     <div className="card hover:border-dark-400 transition-colors group flex flex-col relative">
       {isNew && (
         <span className="absolute top-2 left-2 z-10 badge bg-rust-600 text-white border-0 glow-rust">NEW</span>
+      )}
+      {isHot && (
+        <span className="absolute top-2 left-2 z-10 badge bg-orange-800 text-orange-200 border-0">🔥 HOT</span>
       )}
 
       {header_image

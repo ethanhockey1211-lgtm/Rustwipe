@@ -4,6 +4,7 @@ import ForceWipeBanner from './components/ForceWipeBanner.jsx';
 import JustWiped from './pages/JustWiped.jsx';
 import UpcomingWipes from './pages/UpcomingWipes.jsx';
 import Alerts from './pages/Alerts.jsx';
+import Feed from './pages/Feed.jsx';
 import ServerDetail from './pages/ServerDetail.jsx';
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
             <Route path="/"             element={<JustWiped />} />
             <Route path="/upcoming"     element={<UpcomingWipes />} />
             <Route path="/alerts"       element={<Alerts />} />
+            <Route path="/feed"         element={<Feed />} />
             <Route path="/server/:id"   element={<ServerDetail />} />
             <Route path="*"             element={<Navigate to="/" replace />} />
           </Routes>

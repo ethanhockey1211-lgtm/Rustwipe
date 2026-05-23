@@ -51,6 +51,7 @@ export default function Header() {
         <nav className="flex items-center gap-1 flex-shrink-0">
           <NavLink to="/"         className={NAV}>Just Wiped</NavLink>
           <NavLink to="/upcoming" className={NAV}>Upcoming</NavLink>
+          <NavLink to="/feed"     className={NAV}>📡 Feed</NavLink>
           <NavLink to="/alerts"   className={NAV}>🔔 Alerts</NavLink>
         </nav>
 
