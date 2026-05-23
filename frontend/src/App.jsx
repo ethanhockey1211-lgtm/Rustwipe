@@ -4,6 +4,7 @@ import ForceWipeBanner from './components/ForceWipeBanner.jsx';
 import JustWiped from './pages/JustWiped.jsx';
 import UpcomingWipes from './pages/UpcomingWipes.jsx';
 import Alerts from './pages/Alerts.jsx';
+import ServerDetail from './pages/ServerDetail.jsx';
 
 export default function App() {
   return (
@@ -13,10 +14,11 @@ export default function App() {
         <ForceWipeBanner />
         <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
           <Routes>
-            <Route path="/"         element={<JustWiped />} />
-            <Route path="/upcoming" element={<UpcomingWipes />} />
-            <Route path="/alerts"   element={<Alerts />} />
-            <Route path="*"         element={<Navigate to="/" replace />} />
+            <Route path="/"             element={<JustWiped />} />
+            <Route path="/upcoming"     element={<UpcomingWipes />} />
+            <Route path="/alerts"       element={<Alerts />} />
+            <Route path="/server/:id"   element={<ServerDetail />} />
+            <Route path="*"             element={<Navigate to="/" replace />} />
           </Routes>
         </main>
         <footer className="border-t border-dark-600 py-4 text-center text-dark-400 text-xs">
