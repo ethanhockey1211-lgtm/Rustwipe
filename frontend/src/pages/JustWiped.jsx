@@ -81,7 +81,7 @@ export default function JustWiped() {
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-white">🔥 Just Wiped</h1>
-        <p className="text-dark-300 text-sm mt-1">Rust servers that recently wiped — find your fresh start</p>
+        <p className="text-dark-300 text-sm mt-1">Rust servers that recently wiped — fresh maps, fresh start</p>
       </div>
 
       <DashboardStats />

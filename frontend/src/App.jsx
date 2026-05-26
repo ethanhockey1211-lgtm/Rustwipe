@@ -23,11 +23,17 @@ export default function App() {
             <Route path="*"             element={<Navigate to="/" replace />} />
           </Routes>
         </main>
-        <footer className="border-t border-dark-600 py-4 text-center text-dark-400 text-xs">
-          RustWipe · Data from{' '}
-          <a href="https://www.battlemetrics.com" target="_blank" rel="noopener noreferrer"
-            className="text-rust-500 hover:text-rust-400">BattleMetrics</a>
-          {' '}· Auto-refreshes every 5 min · Force wipe = first Thursday each month
+        <footer className="border-t border-dark-600/80 py-5 text-center text-dark-400 text-xs space-y-1">
+          <div>
+            <span className="text-white font-semibold">RustWipe</span>
+            {' · '}Server data from{' '}
+            <a href="https://www.battlemetrics.com" target="_blank" rel="noopener noreferrer"
+              className="text-rust-500 hover:text-rust-400 transition-colors">BattleMetrics</a>
+            {' · '}Refreshes every 5 min
+          </div>
+          <div className="text-dark-500">
+            ⚡ Monthly wipe times are exact — Facepunch force wipes every first Thursday of the month at 2 PM ET / 19:00 UTC
+          </div>
         </footer>
       </div>
     </BrowserRouter>

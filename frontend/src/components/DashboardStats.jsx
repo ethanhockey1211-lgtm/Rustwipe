@@ -17,15 +17,17 @@ export default function DashboardStats() {
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <StatCard icon="🖥️" value={stats?.totalServers?.toLocaleString()}       label="Servers Tracked" />
       <StatCard icon="🔥" value={stats?.wipedToday?.toLocaleString()}         label="Wiped Today"      accent />
-      <StatCard icon="📈" value={stats?.totalWipesTracked?.toLocaleString()}  label="Total Wipes Logged" />
-      <StatCard icon="✅" value={stats?.serversWithHistory?.toLocaleString()} label="Servers w/ History" />
+      <StatCard icon="📈" value={stats?.totalWipesTracked?.toLocaleString()}  label="Wipes Logged" />
+      <StatCard icon="📋" value={stats?.serversWithHistory?.toLocaleString()} label="With History" />
     </div>
   );
 }
 
 function StatCard({ icon, value, label, accent = false }) {
   return (
-    <div className={`card p-3.5 flex items-center gap-3 transition-colors ${accent ? 'border-rust-700/50' : ''}`}>
+    <div className={`rounded-xl border p-3.5 flex items-center gap-3 bg-dark-700 transition-colors ${
+      accent ? 'border-rust-700/50 bg-rust-900/20' : 'border-dark-500'
+    }`}>
       <span className="text-2xl leading-none flex-shrink-0">{icon}</span>
       <div className="min-w-0">
         <div className={`text-xl font-bold leading-none ${accent ? 'text-rust-400' : 'text-white'}`}>

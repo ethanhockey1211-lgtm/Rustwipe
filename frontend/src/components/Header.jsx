@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useState, useRef } from 'react';
 import axios from 'axios';
 
@@ -33,22 +33,22 @@ export default function Header() {
   }
 
   return (
-    <header className="bg-dark-700 border-b border-dark-600 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
+    <header className="bg-dark-800 border-b border-dark-600/80 sticky top-0 z-50 shadow-lg shadow-dark-900/50">
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
 
         {/* Logo */}
         <a href="/" className="flex items-center gap-2 flex-shrink-0">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
             <circle cx="14" cy="14" r="14" fill="#cd3d00"/>
             <path d="M8 20 L14 8 L20 20 L16 20 L14 15 L12 20 Z" fill="white"/>
           </svg>
-          <span className="text-lg font-bold text-white tracking-tight hidden sm:block">
+          <span className="text-base font-bold text-white tracking-tight hidden sm:block">
             Rust<span className="text-rust-500">Wipe</span>
           </span>
         </a>
 
         {/* Nav */}
-        <nav className="flex items-center gap-1 flex-shrink-0">
+        <nav className="flex items-center gap-0.5 flex-shrink-0">
           <NavLink to="/"         className={NAV}>Just Wiped</NavLink>
           <NavLink to="/upcoming" className={NAV}>Upcoming</NavLink>
           <NavLink to="/feed"     className={NAV}>📡 Feed</NavLink>
@@ -75,19 +75,30 @@ export default function Header() {
           {open && results.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-dark-600 border border-dark-500 rounded-xl shadow-2xl overflow-hidden z-50">
               {results.map(s => (
-                <a
+                <div
                   key={s.id}
-                  href={`steam://connect/${s.ip}:${s.port || 28015}`}
-                  onMouseDown={e => e.preventDefault()}
                   className="flex items-center gap-3 px-4 py-2.5 hover:bg-dark-500 transition-colors"
                 >
-                  <span className="text-lg leading-none">{countryFlag(s.country)}</span>
-                  <div className="min-w-0 flex-1">
+                  <span className="text-lg leading-none flex-shrink-0">{countryFlag(s.country)}</span>
+                  <Link
+                    to={`/server/${s.id}`}
+                    onMouseDown={e => e.preventDefault()}
+                    className="min-w-0 flex-1"
+                    onClick={() => { setOpen(false); setQuery(''); setResults([]); }}
+                  >
                     <div className="text-sm font-medium text-white truncate">{s.name}</div>
                     <div className="text-xs text-dark-300">{s.players}/{s.max_players} players · {s.country}</div>
-                  </div>
-                  <span className="text-xs text-dark-400 flex-shrink-0">Connect</span>
-                </a>
+                  </Link>
+                  {s.ip && (
+                    <a
+                      href={`steam://connect/${s.ip}:${s.port || 28015}`}
+                      onMouseDown={e => e.preventDefault()}
+                      className="flex-shrink-0 text-[11px] px-2 py-1 bg-rust-700 hover:bg-rust-600 text-white rounded-md font-semibold transition-colors"
+                    >
+                      Join
+                    </a>
+                  )}
+                </div>
               ))}
             </div>
           )}

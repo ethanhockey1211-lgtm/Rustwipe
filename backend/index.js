@@ -125,8 +125,11 @@ function withPrediction(server) {
   const wipeCount = db.prepare(`SELECT COUNT(*) as c FROM wipe_history WHERE server_id=?`).get(server.id)?.c || 0;
   const prevWipe  = db.prepare(`SELECT MAX(wipe_time) as t FROM wipe_history WHERE server_id=? AND wipe_time < ?`)
     .get(server.id, server.rust_last_wipe || '')?.t || null;
+  const avgRow    = wipeCount >= 2
+    ? db.prepare(`SELECT (julianday(MAX(wipe_time))-julianday(MIN(wipe_time)))/(COUNT(*)-1) AS avg FROM wipe_history WHERE server_id=? HAVING COUNT(*)>=2`).get(server.id)
+    : null;
   const forceWipe = getNextForceWipe();
-  const pred = predictNextWipe({ ...server, wipe_count: wipeCount, prev_wipe: prevWipe }, forceWipe);
+  const pred = predictNextWipe({ ...server, wipe_count: wipeCount, prev_wipe: prevWipe, avg_interval_days: avgRow?.avg ?? null }, forceWipe);
   return { ...server, wipe_count: wipeCount, prediction: pred };
 }
 
@@ -222,7 +225,9 @@ app.get('/api/servers/upcoming', (req, res) => {
   const rows = db.prepare(`
     SELECT s.*,
       (SELECT COUNT(*) FROM wipe_history wh WHERE wh.server_id=s.id) AS wipe_count,
-      (SELECT MAX(wipe_time) FROM wipe_history wh2 WHERE wh2.server_id=s.id AND wh2.wipe_time < s.rust_last_wipe) AS prev_wipe
+      (SELECT MAX(wipe_time) FROM wipe_history wh2 WHERE wh2.server_id=s.id AND wh2.wipe_time < s.rust_last_wipe) AS prev_wipe,
+      (SELECT CASE WHEN COUNT(*)>=2 THEN (julianday(MAX(wipe_time))-julianday(MIN(wipe_time)))/(COUNT(*)-1) ELSE NULL END
+       FROM wipe_history wh3 WHERE wh3.server_id=s.id) AS avg_interval_days
     FROM servers s WHERE ${where} ORDER BY s.players DESC
   `).all(p);
 
@@ -236,16 +241,16 @@ app.get('/api/servers/upcoming', (req, res) => {
     if (!pred) continue;
     const next = new Date(pred.nextWipe);
     if (next > now && next <= cutoff) {
-      upcoming.push({ ...s, nextWipe: pred.nextWipe, wipeSchedule: pred.schedule, intervalDays: pred.intervalDays, confidence: pred.confidence });
+      upcoming.push({ ...s, nextWipe: pred.nextWipe, wipeSchedule: pred.schedule, intervalDays: pred.intervalDays, confidence: pred.confidence, wipeSource: pred.source, wipeLabel: pred.source === 'force_wipe' ? 'Force Wipe' : pred.source === 'history' ? 'Scheduled' : 'Estimated' });
     }
   }
 
   if (schedule && schedule !== 'all') upcoming = upcoming.filter(s => s.wipeSchedule === schedule);
 
-  const confOrder = { high:0, medium:1, low:2 };
+  const confOrder = { exact:0, high:1, medium:2, low:3 };
   switch (sort) {
     case 'players':    upcoming.sort((a,b) => b.players - a.players); break;
-    case 'confidence': upcoming.sort((a,b) => (confOrder[a.confidence]??2)-(confOrder[b.confidence]??2)); break;
+    case 'confidence': upcoming.sort((a,b) => (confOrder[a.confidence]??3)-(confOrder[b.confidence]??3)); break;
     default:           upcoming.sort((a,b) => new Date(a.nextWipe)-new Date(b.nextWipe));
   }
   res.json({ servers: upcoming.slice(offset,offset+limit), total: upcoming.length, nextForceWipe: forceWipe.toISOString(), lastUpdated: new Date().toISOString() });
