@@ -15,10 +15,10 @@ const SCHEDULE_COLORS = {
   '3day':   'bg-orange-900/60 text-orange-300 border-orange-700/50',
   weekly:   'bg-amber-900/60 text-amber-300 border-amber-700/50',
   biweekly: 'bg-yellow-900/60 text-yellow-300 border-yellow-700/50',
-  monthly:  'bg-dark-500 text-dark-200 border-dark-400',
+  monthly:  'bg-rust-900/60 text-rust-300 border-rust-700/50',
 };
-const CONFIDENCE_COLORS = { high:'text-green-400', medium:'text-amber-400', low:'text-dark-300' };
-const CONFIDENCE_ICONS  = { high:'●', medium:'◐', low:'○' };
+const CONFIDENCE_COLORS = { exact:'text-rust-400', high:'text-green-400', medium:'text-amber-400', low:'text-dark-300' };
+const CONFIDENCE_ICONS  = { exact:'⚡', high:'●', medium:'◐', low:'○' };
 
 export function countryFlag(code) {
   if (!code || code.length !== 2) return '🌐';
@@ -186,19 +186,44 @@ export function WipedServerCard({ server, watchlist }) {
 
 // ── Upcoming Wipe Card ────────────────────────────────────────────────────────
 export function UpcomingServerCard({ server, watchlist }) {
-  const { players, max_players, ip, port, id, nextWipe, wipeSchedule, confidence, wipe_count, header_image } = server;
+  const { players, max_players, ip, port, id, nextWipe, wipeSchedule, confidence, wipe_count, header_image, wipeSource } = server;
   const bmUrl = `https://www.battlemetrics.com/servers/rust/${id}`;
+  const isForceWipe = wipeSource === 'force_wipe';
+  const isFromHistory = wipeSource === 'history';
+
+  function SourceBadge() {
+    if (isForceWipe) {
+      return <span className="text-[10px] text-rust-400 font-semibold tracking-wide">⚡ Facepunch scheduled</span>;
+    }
+    if (isFromHistory) {
+      return (
+        <span className={`text-[10px] ${CONFIDENCE_COLORS[confidence]}`}>
+          {CONFIDENCE_ICONS[confidence]} {wipe_count > 0 ? `${wipe_count} wipes logged` : confidence}
+        </span>
+      );
+    }
+    if (wipeSource === 'name_tags') {
+      return <span className="text-[10px] text-amber-400">◐ schedule from name</span>;
+    }
+    return <span className="text-[10px] text-dark-300">○ estimated</span>;
+  }
 
   return (
-    <div className="card hover:border-dark-400 transition-colors group flex flex-col">
+    <div className={`card hover:border-dark-400 transition-colors group flex flex-col ${isForceWipe ? 'border-rust-800/60' : ''}`}>
       {header_image
-        ? <div className="h-20 overflow-hidden bg-dark-700">
+        ? <div className="h-20 overflow-hidden bg-dark-700 relative">
             <img src={header_image} alt="" className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity" loading="lazy"/>
+            {isForceWipe && (
+              <div className="absolute inset-0 bg-gradient-to-t from-dark-900/70 to-transparent flex items-end px-3 pb-2">
+                <span className="badge bg-rust-600/90 text-white border-0 text-[10px] tracking-wide uppercase glow-rust">⚡ Force Wipe</span>
+              </div>
+            )}
           </div>
-        : <div className="h-2 bg-gradient-to-r from-amber-700 to-amber-500"/>
+        : <div className={`h-2 bg-gradient-to-r ${isForceWipe ? 'from-rust-700 to-rust-400' : 'from-amber-700 to-amber-500'}`}/>
       }
 
       <div className="px-4 pb-4 pt-3 flex flex-col gap-2.5 flex-1">
+        {/* Server name + flag */}
         <div className="flex items-start justify-between gap-2">
           <Link to={`/server/${id}`} className="text-sm font-semibold text-white leading-tight line-clamp-2 flex-1 hover:text-rust-400 transition-colors">
             {server.name}
@@ -207,27 +232,38 @@ export function UpcomingServerCard({ server, watchlist }) {
         </div>
 
         <Badges server={server} extra={
-          wipeSchedule && <span className={`badge border ${SCHEDULE_COLORS[wipeSchedule]||SCHEDULE_COLORS.monthly}`}>{wipeSchedule}</span>
+          wipeSchedule && (
+            <span className={`badge border ${SCHEDULE_COLORS[wipeSchedule]||SCHEDULE_COLORS.monthly}`}>
+              {isForceWipe ? '⚡ ' : ''}{wipeSchedule}
+            </span>
+          )
         }/>
 
         <PlayerBar players={players} max={max_players}/>
 
-        <div className="flex items-center justify-between pt-1 border-t border-dark-500">
-          <div>
-            <div className="text-[11px] text-dark-400 mb-0.5">Wipes in</div>
-            <CountdownTimer targetDate={nextWipe}/>
-          </div>
-          <div className="text-right">
-            {nextWipe && <div className="text-xs text-dark-200">{format(new Date(nextWipe),'MMM d, h:mm a')}</div>}
-            {confidence && (
-              <div className={`text-[11px] ${CONFIDENCE_COLORS[confidence]}`}>
-                {CONFIDENCE_ICONS[confidence]} {confidence}
-                {wipe_count > 0 && <span className="text-dark-500 ml-1">({wipe_count})</span>}
+        {/* Wipe timing section */}
+        <div className="pt-2 border-t border-dark-500">
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <div className="text-[10px] text-dark-400 uppercase tracking-wider mb-1">
+                {isForceWipe ? 'Force Wipe In' : 'Wipes In'}
               </div>
-            )}
+              <CountdownTimer targetDate={nextWipe}/>
+            </div>
+            <div className="text-right">
+              {nextWipe && (
+                <div className="text-xs text-dark-200 font-medium">
+                  {format(new Date(nextWipe), 'MMM d, h:mm a')}
+                </div>
+              )}
+              <div className="mt-0.5">
+                <SourceBadge />
+              </div>
+            </div>
           </div>
         </div>
 
+        {/* Actions */}
         <div className="flex gap-1.5 mt-auto pt-1">
           {ip && <a href={`steam://connect/${ip}:${port||28015}`} className="flex-1 btn-primary text-center text-xs py-1.5">Connect</a>}
           <StarButton server={server} watchlist={watchlist}/>

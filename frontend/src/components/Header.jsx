@@ -33,22 +33,22 @@ export default function Header() {
   }
 
   return (
-    <header className="bg-dark-700 border-b border-dark-600 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
+    <header className="bg-dark-800 border-b border-dark-600/80 sticky top-0 z-50 shadow-lg shadow-dark-900/50">
+      <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">
 
         {/* Logo */}
         <a href="/" className="flex items-center gap-2 flex-shrink-0">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
             <circle cx="14" cy="14" r="14" fill="#cd3d00"/>
             <path d="M8 20 L14 8 L20 20 L16 20 L14 15 L12 20 Z" fill="white"/>
           </svg>
-          <span className="text-lg font-bold text-white tracking-tight hidden sm:block">
+          <span className="text-base font-bold text-white tracking-tight hidden sm:block">
             Rust<span className="text-rust-500">Wipe</span>
           </span>
         </a>
 
         {/* Nav */}
-        <nav className="flex items-center gap-1 flex-shrink-0">
+        <nav className="flex items-center gap-0.5 flex-shrink-0">
           <NavLink to="/"         className={NAV}>Just Wiped</NavLink>
           <NavLink to="/upcoming" className={NAV}>Upcoming</NavLink>
           <NavLink to="/feed"     className={NAV}>📡 Feed</NavLink>

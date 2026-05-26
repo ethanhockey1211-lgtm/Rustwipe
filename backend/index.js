@@ -236,16 +236,16 @@ app.get('/api/servers/upcoming', (req, res) => {
     if (!pred) continue;
     const next = new Date(pred.nextWipe);
     if (next > now && next <= cutoff) {
-      upcoming.push({ ...s, nextWipe: pred.nextWipe, wipeSchedule: pred.schedule, intervalDays: pred.intervalDays, confidence: pred.confidence });
+      upcoming.push({ ...s, nextWipe: pred.nextWipe, wipeSchedule: pred.schedule, intervalDays: pred.intervalDays, confidence: pred.confidence, wipeSource: pred.source });
     }
   }
 
   if (schedule && schedule !== 'all') upcoming = upcoming.filter(s => s.wipeSchedule === schedule);
 
-  const confOrder = { high:0, medium:1, low:2 };
+  const confOrder = { exact:0, high:1, medium:2, low:3 };
   switch (sort) {
     case 'players':    upcoming.sort((a,b) => b.players - a.players); break;
-    case 'confidence': upcoming.sort((a,b) => (confOrder[a.confidence]??2)-(confOrder[b.confidence]??2)); break;
+    case 'confidence': upcoming.sort((a,b) => (confOrder[a.confidence]??3)-(confOrder[b.confidence]??3)); break;
     default:           upcoming.sort((a,b) => new Date(a.nextWipe)-new Date(b.nextWipe));
   }
   res.json({ servers: upcoming.slice(offset,offset+limit), total: upcoming.length, nextForceWipe: forceWipe.toISOString(), lastUpdated: new Date().toISOString() });

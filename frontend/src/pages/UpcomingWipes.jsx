@@ -69,15 +69,16 @@ export default function UpcomingWipes() {
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-white">⏰ Upcoming Wipes</h1>
-        <p className="text-dark-300 text-sm mt-1">Servers predicted to wipe soon — plan your next Rust session</p>
+        <p className="text-dark-300 text-sm mt-1">Wipe schedule for Rust servers — monthly wipes are Facepunch force wipe times</p>
       </div>
 
       <DashboardStats />
 
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 mb-4 text-xs text-dark-300">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>High — 4+ recorded wipes</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>Medium — name/tag analysis</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-dark-300 inline-block"/>Low — schedule pattern guess</span>
+        <span className="flex items-center gap-1.5"><span className="text-rust-400 font-bold text-base leading-none">⚡</span>Exact — Facepunch force wipe (1st Thursday)</span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>High — 4+ wipes in history</span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>Medium — from server name/tags</span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-dark-300 inline-block"/>Low — estimated from pattern</span>
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} mode="upcoming" />
@@ -104,7 +105,7 @@ export default function UpcomingWipes() {
         </div>
       ) : (
         <>
-          <StatsBar total={total} showing={servers.length} label="servers predicted to wipe" lastUpdated={lastUpdated} />
+          <StatsBar total={total} showing={servers.length} label="upcoming wipes" lastUpdated={lastUpdated} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {servers.map(s => <UpcomingServerCard key={s.id} server={s} watchlist={watchlist} />)}
           </div>

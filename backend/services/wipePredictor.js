@@ -67,10 +67,10 @@ function predictNextWipe(server, forceWipe) {
   const now = new Date();
   const daysSinceWipe = (now - lastWipe) / 86400000;
 
-  // Use historically calculated interval if we have enough data
   let intervalDays = null;
   let scheduleType = null;
   let confidence = 'low';
+  let source = 'estimate';
 
   if (server.wipe_count >= 2 && server.prev_wipe) {
     const prevWipeDate = new Date(server.prev_wipe);
@@ -79,6 +79,7 @@ function predictNextWipe(server, forceWipe) {
       intervalDays = rawInterval;
       scheduleType = classifyInterval(rawInterval);
       confidence = server.wipe_count >= 4 ? 'high' : 'medium';
+      source = 'history';
     }
   }
 
@@ -89,6 +90,7 @@ function predictNextWipe(server, forceWipe) {
       intervalDays = nameSchedule.intervalDays;
       scheduleType = nameSchedule.type;
       confidence = 'medium';
+      source = 'name_tags';
     }
   }
 
@@ -107,6 +109,18 @@ function predictNextWipe(server, forceWipe) {
       scheduleType = 'weekly';
     }
     confidence = 'low';
+    source = 'estimate';
+  }
+
+  // Monthly servers always wipe on Facepunch force wipe day — snap to exact time
+  if (scheduleType === 'monthly' && forceWipe) {
+    return {
+      nextWipe: forceWipe.toISOString(),
+      schedule: 'monthly',
+      intervalDays,
+      confidence: 'exact',
+      source: 'force_wipe',
+    };
   }
 
   // Project forward from last wipe until in the future
@@ -115,19 +129,12 @@ function predictNextWipe(server, forceWipe) {
     nextWipe = new Date(nextWipe.getTime() + intervalDays * 86400000);
   }
 
-  // Snap monthly servers to force wipe date if within 4 days
-  if (scheduleType === 'monthly' && forceWipe) {
-    const diff = Math.abs((forceWipe - nextWipe) / 86400000);
-    if (diff < 4) {
-      nextWipe = new Date(forceWipe);
-    }
-  }
-
   return {
     nextWipe: nextWipe.toISOString(),
     schedule: scheduleType,
     intervalDays,
     confidence,
+    source,
   };
 }
 
