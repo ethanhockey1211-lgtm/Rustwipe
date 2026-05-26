@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Rustwipe.esproj" />
+  <Project Path="backend/backend.esproj" />
+  <Project Path="frontend/frontend.esproj" />
+</Solution>
