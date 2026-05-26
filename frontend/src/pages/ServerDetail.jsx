@@ -5,7 +5,7 @@ import { format, formatDistanceToNow, formatDistance } from 'date-fns';
 import CountdownTimer from '../components/CountdownTimer.jsx';
 import { useWatchlist } from '../hooks/useWatchlist.js';
 
-// ── Helpers (same as ServerCard, kept local to avoid circular imports) ─────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function countryFlag(code) {
   if (!code || code.length !== 2) return '🌐';
   return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 127397));
@@ -32,32 +32,43 @@ const TYPE_COLORS = {
   community:'bg-dark-500 text-dark-200 border-dark-400',
   modded:   'bg-orange-900/60 text-orange-300 border-orange-700/50',
 };
-const CONF_COLORS = { high:'text-green-400', medium:'text-amber-400', low:'text-dark-300' };
-const CONF_ICONS  = { high:'●', medium:'◐', low:'○' };
+const CONF_COLORS = { exact:'text-rust-400', high:'text-green-400', medium:'text-amber-400', low:'text-dark-300' };
+const CONF_ICONS  = { exact:'⚡', high:'●', medium:'◐', low:'○' };
+
+function sourceLabel(prediction) {
+  if (!prediction) return null;
+  switch (prediction.source) {
+    case 'force_wipe': return { label: 'Facepunch scheduled', color: 'text-rust-400', icon: '⚡' };
+    case 'history':    return { label: `from ${prediction.wipe_count || '?'} recorded wipes`, color: 'text-green-400', icon: '●' };
+    case 'name_tags':  return { label: 'detected from server name', color: 'text-amber-400', icon: '◐' };
+    default:           return { label: 'estimated', color: 'text-dark-300', icon: '○' };
+  }
+}
 
 // ── Wipe timeline chart ───────────────────────────────────────────────────────
 function WipeTimeline({ history, avgInterval }) {
   if (!history || history.length === 0) {
-    return <p className="text-dark-400 text-sm italic">No wipe history recorded yet. History builds over time as the tracker runs.</p>;
+    return <p className="text-dark-400 text-sm italic">No wipe history yet — data builds as the tracker runs.</p>;
   }
 
   const maxInterval = Math.max(...history.map(w => w.intervalDays || 0), avgInterval || 0);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {history.map((w, i) => {
         const isLatest = i === 0;
         const pct = maxInterval > 0 && w.intervalDays ? Math.min((w.intervalDays / maxInterval) * 100, 100) : 0;
+        const deviation = avgInterval && w.intervalDays ? Math.abs(w.intervalDays - avgInterval) / avgInterval : 0;
         const barColor = w.intervalDays
-          ? Math.abs(w.intervalDays - (avgInterval || w.intervalDays)) < 1 ? 'bg-green-500' : 'bg-amber-500'
+          ? deviation < 0.1 ? 'bg-green-500' : deviation < 0.25 ? 'bg-amber-500' : 'bg-red-500'
           : 'bg-dark-500';
 
         return (
           <div key={w.wipe_time} className="flex items-center gap-3 group">
-            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isLatest ? 'bg-rust-500' : 'bg-dark-400'}`} />
-            <div className="w-36 flex-shrink-0">
-              <div className="text-xs text-white">{format(new Date(w.wipe_time), 'MMM d, h:mm a')}</div>
-              <div className="text-[11px] text-dark-400">
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isLatest ? 'bg-rust-400' : 'bg-dark-500'}`} />
+            <div className="w-40 flex-shrink-0">
+              <div className="text-xs text-white font-medium">{format(new Date(w.wipe_time), 'MMM d, h:mm a')}</div>
+              <div className="text-[10px] text-dark-400">
                 {formatDistanceToNow(new Date(w.wipe_time), { addSuffix: true })}
               </div>
             </div>
@@ -65,16 +76,16 @@ function WipeTimeline({ history, avgInterval }) {
               {w.intervalDays != null ? (
                 <>
                   <div className="flex-1 h-1.5 bg-dark-600 rounded-full overflow-hidden">
-                    <div className={`h-full ${barColor} rounded-full`} style={{ width: `${pct}%` }} />
+                    <div className={`h-full ${barColor} rounded-full transition-all`} style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-xs text-dark-300 w-16 text-right tabular-nums">
+                  <span className="text-xs text-dark-300 w-14 text-right tabular-nums flex-shrink-0">
                     {w.intervalDays < 1
                       ? `${Math.round(w.intervalDays * 24)}h`
                       : `${w.intervalDays.toFixed(1)}d`}
                   </span>
                 </>
               ) : (
-                <span className="text-xs text-dark-500">First recorded wipe</span>
+                <span className="text-xs text-dark-500 italic">first entry</span>
               )}
             </div>
           </div>
@@ -87,9 +98,9 @@ function WipeTimeline({ history, avgInterval }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ServerDetail() {
   const { id } = useParams();
-  const [data, setData]   = useState(null);
+  const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError]     = useState(null);
   const watchlist = useWatchlist();
 
   useEffect(() => {
@@ -131,8 +142,8 @@ export default function ServerDetail() {
   const serverAge  = server.rust_born
     ? formatDistance(new Date(server.rust_born), new Date(), { addSuffix: false }) + ' old'
     : null;
+  const src = sourceLabel(prediction);
 
-  // Consistency score: how reliably does this server wipe on schedule?
   const intervals = wipeHistory.map(w => w.intervalDays).filter(d => d != null && d > 0);
   const consistency = (() => {
     if (intervals.length < 2) return null;
@@ -150,8 +161,11 @@ export default function ServerDetail() {
     ? (Date.now() - new Date(server.rust_last_wipe).getTime()) / 3600000 : Infinity;
   const hot = hoursSinceWipe < 4 && playerPct >= 25;
 
+  const isForceWipe = prediction?.source === 'force_wipe';
+  const nextWipeTitle = isForceWipe ? '⚡ Force Wipe' : '⏰ Next Wipe';
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-5">
 
       {/* Back */}
       <Link to="/" className="inline-flex items-center gap-1.5 text-dark-300 hover:text-white text-sm transition-colors">
@@ -161,17 +175,18 @@ export default function ServerDetail() {
       {/* Hero */}
       <div className="card overflow-hidden">
         {server.header_image ? (
-          <div className="h-44 sm:h-56 overflow-hidden">
+          <div className="h-44 sm:h-52 overflow-hidden relative">
             <img src={server.header_image} alt="" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-dark-800/80 to-transparent" />
           </div>
         ) : (
           <div className="h-3 bg-gradient-to-r from-rust-700 to-rust-500" />
         )}
 
-        <div className="p-6">
+        <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap mb-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1.5">
                 <span className="text-2xl">{countryFlag(server.country)}</span>
                 <span className={`badge border ${TYPE_COLORS[server.server_type]||TYPE_COLORS.community}`}>
                   {server.server_type}
@@ -190,7 +205,7 @@ export default function ServerDetail() {
               {serverAge && <p className="text-xs text-dark-400 mt-1">Server {serverAge}</p>}
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
               <button
                 onClick={() => watchlist.toggle(server)}
                 className={`btn-ghost border py-2 px-3 text-lg ${isWatched ? 'border-amber-600/60 text-amber-400' : 'border-dark-500'}`}
@@ -217,41 +232,42 @@ export default function ServerDetail() {
                 style={{ width: `${playerPct}%` }}
               />
             </div>
-            <span className="text-sm font-semibold text-white tabular-nums">
+            <span className="text-sm font-semibold text-white tabular-nums whitespace-nowrap">
               {server.players}/{server.max_players} players
             </span>
           </div>
         </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <InfoCard label="Map Size"   value={server.world_size?.toLocaleString() || '—'} icon="🗺" />
-        <InfoCard label="Wipes Tracked" value={wipeHistory.length} icon="📊" />
-        <InfoCard label="Avg Interval"
-          value={avgInterval != null ? (avgInterval < 1 ? `${Math.round(avgInterval*24)}h` : `${avgInterval.toFixed(1)}d`) : '—'}
-          icon="⏱"
-        />
-        <InfoCard
-          label="Schedule Reliability"
-          value={consistency != null ? `${consistency}%` : '—'}
-          icon={consistency == null ? '📈' : consistency >= 85 ? '✅' : consistency >= 60 ? '⚠️' : '❌'}
-          valueClass={consistencyColor}
-          tooltip={consistency != null ? `Based on ${intervals.length} recorded intervals` : 'Need 3+ wipes to calculate'}
-        />
-      </div>
       {hot && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-orange-900/30 border border-orange-700/40 rounded-xl text-orange-300 text-sm">
           🔥 <span className="font-semibold">Hot server</span> — wiped recently and filling up fast ({Math.round(playerPct)}% full)
         </div>
       )}
 
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <InfoCard label="Map Size"   value={server.world_size?.toLocaleString() || '—'} icon="🗺" />
+        <InfoCard label="Wipes Recorded" value={wipeHistory.length || '—'} icon="📊" />
+        <InfoCard label="Avg Interval"
+          value={avgInterval != null ? (avgInterval < 1 ? `${Math.round(avgInterval*24)}h` : `${avgInterval.toFixed(1)}d`) : '—'}
+          icon="⏱"
+        />
+        <InfoCard
+          label="Reliability"
+          value={consistency != null ? `${consistency}%` : '—'}
+          icon={consistency == null ? '📈' : consistency >= 85 ? '✅' : consistency >= 60 ? '⚠️' : '❌'}
+          valueClass={consistencyColor}
+          tooltip={consistency != null ? `Based on ${intervals.length} recorded intervals` : 'Need 3+ wipes to calculate'}
+        />
+      </div>
+
       {/* Wipe info row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
         {/* Last wipe */}
         <div className="card p-5">
-          <h2 className="text-sm font-bold text-dark-300 uppercase tracking-wider mb-3">🔥 Last Wipe</h2>
+          <h2 className="text-xs font-bold text-dark-300 uppercase tracking-wider mb-3">🔥 Last Wipe</h2>
           {server.rust_last_wipe ? (
             <>
               <p className="text-2xl font-bold text-white">{format(new Date(server.rust_last_wipe), 'MMM d, h:mm a')}</p>
@@ -265,62 +281,78 @@ export default function ServerDetail() {
           )}
         </div>
 
-        {/* Next wipe prediction */}
-        <div className="card p-5">
-          <h2 className="text-sm font-bold text-dark-300 uppercase tracking-wider mb-3">⏰ Next Wipe Prediction</h2>
+        {/* Next wipe */}
+        <div className={`card p-5 ${isForceWipe ? 'border-rust-800/50' : ''}`}>
+          <h2 className="text-xs font-bold text-dark-300 uppercase tracking-wider mb-3">{nextWipeTitle}</h2>
           {prediction ? (
             <>
               <p className="text-2xl font-bold text-white">{format(new Date(prediction.nextWipe), 'MMM d, h:mm a')}</p>
-              <div className="flex items-center gap-3 mt-2">
-                <CountdownTimer targetDate={prediction.nextWipe} />
-                <span className={`text-xs ${CONF_COLORS[prediction.confidence]}`}>
-                  {CONF_ICONS[prediction.confidence]} {prediction.confidence} confidence
-                </span>
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <CountdownTimer targetDate={prediction.nextWipe} variant="blocks" />
+                {src && (
+                  <span className={`text-xs ${src.color} flex items-center gap-1`}>
+                    <span>{src.icon}</span>
+                    <span>{src.label}</span>
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-dark-400 mt-1 capitalize">
-                Schedule: {prediction.schedule || 'unknown'}
-                {prediction.intervalDays && ` · ~${prediction.intervalDays.toFixed(1)} day interval`}
-              </p>
+              {prediction.source !== 'force_wipe' && prediction.intervalDays && (
+                <p className="text-xs text-dark-400 mt-1.5 capitalize">
+                  {prediction.schedule} · ~{prediction.intervalDays.toFixed(1)} day interval
+                </p>
+              )}
+              {isForceWipe && (
+                <p className="text-xs text-rust-500/70 mt-1.5">
+                  Facepunch patches all servers on this date
+                </p>
+              )}
             </>
           ) : (
-            <p className="text-dark-400 text-sm">Not enough data to predict</p>
+            <p className="text-dark-400 text-sm">Not enough data to calculate</p>
           )}
         </div>
       </div>
 
       {/* Wipe History */}
-      <div className="card p-6">
+      <div className="card p-5 sm:p-6">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-base font-bold text-white">📅 Wipe History</h2>
-          {avgInterval != null && (
-            <span className="text-xs text-dark-300 bg-dark-600 border border-dark-500 px-2 py-1 rounded-lg">
-              Average: {avgInterval < 1 ? `${Math.round(avgInterval*24)}h` : `${avgInterval.toFixed(1)} days`}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {avgInterval != null && (
+              <span className="text-xs text-dark-300 bg-dark-700 border border-dark-500 px-2.5 py-1 rounded-lg">
+                avg {avgInterval < 1 ? `${Math.round(avgInterval*24)}h` : `${avgInterval.toFixed(1)}d`}
+              </span>
+            )}
+            {consistency != null && (
+              <span className={`text-xs ${consistencyColor} bg-dark-700 border border-dark-500 px-2.5 py-1 rounded-lg`}>
+                {consistency}% reliable
+              </span>
+            )}
+          </div>
         </div>
         <WipeTimeline history={wipeHistory} avgInterval={avgInterval} />
       </div>
 
-      {/* Map thumbnail if available */}
+      {/* Map thumbnail */}
       {(server.map_thumbnail_url || server.map_url) && (
         <div className="card p-5">
-          <h2 className="text-base font-bold text-white mb-3">🗺 Current Map</h2>
-          <div className="flex gap-4 items-start">
+          <h2 className="text-base font-bold text-white mb-4">🗺 Current Map</h2>
+          <div className="flex gap-5 items-start">
             {server.map_thumbnail_url && (
               <a href={server.map_url || server.map_thumbnail_url} target="_blank" rel="noopener noreferrer">
                 <img
                   src={server.map_thumbnail_url}
                   alt="Map preview"
-                  className="w-32 h-32 rounded-lg object-cover border border-dark-500 hover:border-rust-500 transition-colors"
+                  className="w-36 h-36 rounded-xl object-cover border border-dark-500 hover:border-rust-500 transition-colors"
                 />
               </a>
             )}
-            <div className="text-sm text-dark-300 space-y-1">
-              {server.world_size && <p>Size: <span className="text-white">{server.world_size.toLocaleString()}</span></p>}
+            <div className="text-sm text-dark-300 space-y-1.5">
+              {server.world_size && <p>Size: <span className="text-white font-medium">{server.world_size.toLocaleString()}</span></p>}
               {server.map_seed   && <p>Seed: <span className="text-white font-mono">{server.map_seed}</span></p>}
               {server.map_url && (
                 <a href={server.map_url} target="_blank" rel="noopener noreferrer"
-                  className="text-rust-400 hover:text-rust-300 text-xs">
+                  className="text-rust-400 hover:text-rust-300 text-xs inline-flex items-center gap-1">
                   View full map →
                 </a>
               )}
@@ -340,7 +372,7 @@ export default function ServerDetail() {
                 to={`/server/${s.id}`}
                 className="card p-3.5 hover:border-dark-400 transition-colors flex items-center gap-3"
               >
-                <span className="text-xl">{countryFlag(s.country)}</span>
+                <span className="text-xl flex-shrink-0">{countryFlag(s.country)}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-white truncate">{s.name}</p>
                   <p className="text-xs text-dark-300">{s.players}/{s.max_players} players</p>
@@ -358,9 +390,9 @@ export default function ServerDetail() {
 function InfoCard({ icon, label, value, valueClass = 'text-white', tooltip }) {
   return (
     <div className="card p-4 text-center" title={tooltip}>
-      <div className="text-2xl mb-1">{icon}</div>
-      <div className={`text-lg font-bold ${valueClass}`}>{value}</div>
-      <div className="text-xs text-dark-400">{label}</div>
+      <div className="text-2xl mb-1.5">{icon}</div>
+      <div className={`text-lg font-bold leading-none ${valueClass}`}>{value}</div>
+      <div className="text-xs text-dark-400 mt-1">{label}</div>
     </div>
   );
 }

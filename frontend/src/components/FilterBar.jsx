@@ -145,7 +145,7 @@ export default function FilterBar({ filters, onChange, mode = 'wiped' }) {
                 <>
                   <option value="soon">Wiping Soonest</option>
                   <option value="players">Most Players</option>
-                  <option value="confidence">Highest Confidence</option>
+                  <option value="confidence">Most Certain</option>
                 </>
               )}
             </select>

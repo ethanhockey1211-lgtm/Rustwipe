@@ -6,17 +6,17 @@ import { SkeletonGrid } from '../components/SkeletonCard.jsx';
 import StatsBar from '../components/StatsBar.jsx';
 import DashboardStats from '../components/DashboardStats.jsx';
 import { useWatchlist } from '../hooks/useWatchlist.js';
-import { format } from 'date-fns';
+import { format, differenceInHours } from 'date-fns';
 
 const PAGE_SIZE = 48;
 
 export default function UpcomingWipes() {
-  const [filters, setFilters]   = useState(defaultFilters('upcoming'));
-  const [servers, setServers]   = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [page, setPage]         = useState(0);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
+  const [filters, setFilters]         = useState(defaultFilters('upcoming'));
+  const [servers, setServers]         = useState([]);
+  const [total, setTotal]             = useState(0);
+  const [page, setPage]               = useState(0);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [nextForceWipe, setNextForceWipe] = useState(null);
   const abortRef  = useRef(null);
@@ -64,21 +64,53 @@ export default function UpcomingWipes() {
   }, [filters, page, fetchServers]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
+  const forceWipeHoursAway = nextForceWipe ? differenceInHours(new Date(nextForceWipe), new Date()) : null;
+  const forceWipeImminent  = forceWipeHoursAway != null && forceWipeHoursAway >= 0 && forceWipeHoursAway <= 48;
 
   return (
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-white">⏰ Upcoming Wipes</h1>
-        <p className="text-dark-300 text-sm mt-1">Wipe schedule for Rust servers — monthly wipes are Facepunch force wipe times</p>
+        <p className="text-dark-300 text-sm mt-1">
+          Wipe schedule for tracked servers — monthly wipe times are exact Facepunch force wipe dates
+        </p>
       </div>
 
       <DashboardStats />
 
+      {/* Force wipe alert */}
+      {forceWipeImminent && nextForceWipe && (
+        <div className="flex items-center gap-3 px-4 py-3 mb-5 bg-rust-900/30 border border-rust-700/50 rounded-xl">
+          <span className="text-2xl">⚡</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white">
+              Force Wipe in {forceWipeHoursAway < 1 ? 'less than an hour' : `${forceWipeHoursAway}h`}
+            </p>
+            <p className="text-xs text-rust-400 mt-0.5">
+              {format(new Date(nextForceWipe), 'EEEE, MMMM d · h:mm a')} — all monthly/official/vanilla servers will wipe
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Confidence legend */}
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 mb-4 text-xs text-dark-300">
-        <span className="flex items-center gap-1.5"><span className="text-rust-400 font-bold text-base leading-none">⚡</span>Exact — Facepunch force wipe (1st Thursday)</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>High — 4+ wipes in history</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>Medium — from server name/tags</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-dark-300 inline-block"/>Low — estimated from pattern</span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-rust-400 font-bold leading-none">⚡</span>
+          Exact — Facepunch force wipe (1st Thursday)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>
+          High — 4+ wipes in history
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>
+          Medium — server name/tags
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-dark-300 inline-block"/>
+          Low — estimated
+        </span>
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} mode="upcoming" />
@@ -94,13 +126,17 @@ export default function UpcomingWipes() {
         <div className="text-center py-24">
           <p className="text-4xl mb-3">📅</p>
           <p className="text-dark-200 text-lg font-medium mb-1">No upcoming wipes in this window</p>
-          <p className="text-dark-400 text-sm mb-3">Try extending the time window or adjusting filters</p>
+          <p className="text-dark-400 text-sm mb-4">Try extending the time window or adjusting filters</p>
           {nextForceWipe && (
-            <p className="text-dark-300 text-sm">
-              Next force wipe: <span className="text-white font-semibold">
-                {format(new Date(nextForceWipe), 'MMMM d, yyyy · h:mm a')}
+            <div className="inline-flex items-center gap-2 px-4 py-2.5 bg-dark-700 border border-dark-500 rounded-xl">
+              <span className="text-rust-500">⚡</span>
+              <span className="text-sm text-dark-200">
+                Next force wipe:{' '}
+                <span className="text-white font-semibold">
+                  {format(new Date(nextForceWipe), 'MMMM d · h:mm a')}
+                </span>
               </span>
-            </p>
+            </div>
           )}
         </div>
       ) : (

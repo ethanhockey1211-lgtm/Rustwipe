@@ -60,6 +60,14 @@ function classifyInterval(days) {
   return 'monthly';
 }
 
+// Round intervals for weekly/biweekly so projections land on the same day of week
+function normalizeInterval(days, type) {
+  if (type === 'weekly')   return Math.round(days / 7)  * 7;
+  if (type === 'biweekly') return Math.round(days / 14) * 14;
+  if (type === '3day')     return Math.round(days / 3)  * 3;
+  return days;
+}
+
 function predictNextWipe(server, forceWipe) {
   if (!server.rust_last_wipe) return null;
 
@@ -72,7 +80,19 @@ function predictNextWipe(server, forceWipe) {
   let confidence = 'low';
   let source = 'estimate';
 
-  if (server.wipe_count >= 2 && server.prev_wipe) {
+  // Priority 1: Average interval across all recorded wipes (most stable)
+  if (server.avg_interval_days != null && server.wipe_count >= 2) {
+    const avg = server.avg_interval_days;
+    if (avg > 0.5 && avg < 45) {
+      intervalDays = avg;
+      scheduleType = classifyInterval(avg);
+      confidence = server.wipe_count >= 4 ? 'high' : 'medium';
+      source = 'history';
+    }
+  }
+
+  // Priority 2: Interval from last two wipes (fallback if no avg provided)
+  if (!intervalDays && server.wipe_count >= 2 && server.prev_wipe) {
     const prevWipeDate = new Date(server.prev_wipe);
     const rawInterval = (lastWipe - prevWipeDate) / 86400000;
     if (rawInterval > 0.5 && rawInterval < 45) {
@@ -83,7 +103,7 @@ function predictNextWipe(server, forceWipe) {
     }
   }
 
-  // Fall back to name/tag analysis
+  // Priority 3: Name / tag schedule detection
   if (!intervalDays) {
     const nameSchedule = detectScheduleFromName(server.name, server.tags);
     if (nameSchedule) {
@@ -94,7 +114,7 @@ function predictNextWipe(server, forceWipe) {
     }
   }
 
-  // Last resort: guess from context
+  // Priority 4: Context-based guess
   if (!intervalDays) {
     const prevForce = getPreviousForceWipe(lastWipe);
     const daysFromForce = Math.abs((lastWipe - prevForce) / 86400000);
@@ -112,7 +132,7 @@ function predictNextWipe(server, forceWipe) {
     source = 'estimate';
   }
 
-  // Monthly servers always wipe on Facepunch force wipe day — snap to exact time
+  // Monthly servers always wipe on Facepunch force wipe day — exact known date
   if (scheduleType === 'monthly' && forceWipe) {
     return {
       nextWipe: forceWipe.toISOString(),
@@ -122,6 +142,9 @@ function predictNextWipe(server, forceWipe) {
       source: 'force_wipe',
     };
   }
+
+  // Normalize interval for weekly/biweekly so projection stays on same day-of-week
+  intervalDays = normalizeInterval(intervalDays, scheduleType);
 
   // Project forward from last wipe until in the future
   let nextWipe = new Date(lastWipe.getTime() + intervalDays * 86400000);
